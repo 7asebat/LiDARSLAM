@@ -20,7 +20,7 @@
 
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(arg rvizconfig)" required="true" />
   <node name="rqt_robot_steering" pkg="rqt_robot_steering" type="rqt_robot_steering" />
-<!-- <node name="slam" pkg="slam_code" type="slamcode.py" /> -->
+<node name="slam" pkg="slam_code" type="slamcode.py" />
   <group ns="$(arg ns)">
     <!-- Load joint controller configurations from YAML file to parameter server -->
     <rosparam file="$(find vehicle_model)/config/controller.yaml" command="load"/>
