@@ -1,3 +1,5 @@
+import numpy as np
+
 def Bresenham3D(p, q):
     ListOfPoints = []
     ListOfPoints.append(p)
