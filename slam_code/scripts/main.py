@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 from matplotlib.pyplot import grid
 import rospy
-import struct
 import numpy as np
 from time import time
+import timeit
 
 # ROS dependencies
 import sensor_msgs.point_cloud2 as pc2
@@ -15,9 +15,10 @@ import tf2_ros
 import tf2_geometry_msgs
 import std_msgs
 class Map:
-    def __init__(self, w = 200, h = 200):
+    def __init__(self, w = 125, h = 125, e = 10):
         self.w = w # width
         self.h = h # height
+        self.e = e # elevation
 
         p_occ = 0.75 # probability of occupancy in the sensor model
         p_free = 0.45 # probability of free in the sensor model
@@ -26,7 +27,7 @@ class Map:
         self.l_free = prob_to_log(p_free) # log odds of free in the sensor model
         self.prior = prob_to_log(p_prior) # log odds of prior occupancy in the sensor model
 
-        self.map =  np.ones((w, h)) * self.prior
+        self.map =  np.ones((w, h, e)) * self.prior
 
 class Particle:
     def __init__(self, pose):
@@ -39,10 +40,10 @@ def scan_matching_callback(data):
     particle.pose['theta'] = data.theta
 
 def translate_points_to_center(p):
-    return p[0] + map.h/2, p[1] + map.w/2
+    return p[0] + map.h/2, p[1] + map.w/2, p[2]
 
 def translate_points_from_center(p):
-    return p[0] - map.h/2 + 1, p[1] - map.w/2 + 1
+    return p[0] - map.h/2 + 1, p[1] - map.w/2 + 1, p[2]
 
 def transform_point_to_basis(p):
     pt = tf2_geometry_msgs.PointStamped()
@@ -59,23 +60,29 @@ def transform_point_to_basis(p):
     return np.array([pt.point.x, pt.point.y, pt.point.z])
 
 
+def enumerate_3(M):
+    def indices_3(*shape):
+        idx = np.transpose(np.indices(shape), (2, 1, 3, 0))
+        return idx.reshape((shape[0] * shape[1] * shape[2], 3))
+    
+    data = np.asmatrix(M.flatten()).T
+    augmented = indices_3(*M.shape)
+    augmented = np.hstack((augmented, data))
+    
+    return augmented
+
 def normalize_and_publish_map():
     grid_map_p = log_to_prob(map.map)
-    
-    points = []
 
-    for i in range(grid_map_p.shape[0]):
-        for j in range(grid_map_p.shape[1]):
-            a = int(grid_map_p[i, j] * 255)
-            rgb = struct.unpack('I', struct.pack('BBBB', a, a, a, a))[0]
-            q = translate_points_from_center([i, j])
-            points.append([q[1], q[0], 1, rgb])
-        
-  
+    points = enumerate_3(grid_map_p)
+    points = np.delete(points, np.where(points[:, 3] < 0.7), axis=0)
+    points = points[:, :3]
+    points += [-map.h / 2 + 1, -map.w / 2 + 1, 0]
+    points = points.tolist()
+
     fields = [PointField('x',    0,  PointField.FLOAT32, 1),
               PointField('y',    4,  PointField.FLOAT32, 1),
-              PointField('z',    8,  PointField.FLOAT32, 1),
-              PointField('rgba', 12, PointField.UINT32,  1)]   
+              PointField('z',    8,  PointField.FLOAT32, 1)]   
 
     header = std_msgs.msg.Header()
     header.frame_id = "world"
@@ -95,7 +102,7 @@ def lidar_reading_callback(data):
     data = pc2.read_points(data, skip_nans=True, field_names=("x", "y", "z"))
     data = np.array(list(data))
 
-    current_robot_pose = [particle.pose['x'], particle.pose['y']]
+    current_robot_pose = [particle.pose['x'], particle.pose['y'], 0]
     current_robot_pose = translate_points_to_center(current_robot_pose)
 
     for lidar_p in data:
@@ -103,7 +110,7 @@ def lidar_reading_callback(data):
             continue
         transformed_lidar_p = lidar_p
         transformed_lidar_p = transform_point_to_basis([transformed_lidar_p[0], transformed_lidar_p[1], transformed_lidar_p[2]])
-        transformed_lidar_p = translate_points_to_center([transformed_lidar_p[0], transformed_lidar_p[1]])
+        transformed_lidar_p = translate_points_to_center([transformed_lidar_p[0], transformed_lidar_p[1], transformed_lidar_p[2]])
         
         # check bounds
         if transformed_lidar_p[0] < 0 \
@@ -116,11 +123,11 @@ def lidar_reading_callback(data):
         rr, cc = line(int(current_robot_pose[0]), int(current_robot_pose[1]), int(transformed_lidar_p[0]), int(transformed_lidar_p[1]))
 
         # miss
-        map.map[cc, rr] += map.l_free - map.prior
+        map.map[cc, rr, 0] += map.l_free - map.prior
 
         # hit, but need to subtract the added value above
-        map.map[cc[-1], rr[-1]] -= map.l_free - map.prior
-        map.map[cc[-1], rr[-1]] += map.l_occ - map.prior
+        map.map[cc[-1], rr[-1], 0] -= map.l_free - map.prior
+        map.map[cc[-1], rr[-1], 0] += map.l_occ - map.prior
 
         # constraint ranges ranges
         map.map[map.map > 100] = 100
@@ -130,7 +137,7 @@ prev_time = time() # in sec
 initial_pose = { 'x': 0, 'y': 0, 'theta': 0}
 particle = Particle(initial_pose)
 
-map = Map()
+map = Map(125, 125, 10)
 world_base_footprint_tf_buffer = None
 world_base_footprint_tf_listener = None
 world_base_footprint_tf_transform = None
