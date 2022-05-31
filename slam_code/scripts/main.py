@@ -3,29 +3,17 @@ from matplotlib.pyplot import grid
 import rospy
 import struct
 import numpy as np
-import pdb
 from time import time
 
 # ROS dependencies
 import sensor_msgs.point_cloud2 as pc2
 from sensor_msgs.msg    import PointCloud2, PointField
 from geometry_msgs.msg  import PoseStamped, Pose2D
-from nav_msgs.msg import OccupancyGrid
 from skimage.draw import line
 
 import tf2_ros
 import tf2_geometry_msgs
 import std_msgs
-
-def normalize_angle(angle):
-    while angle > np.pi:
-        angle = angle - 2. * np.pi
-
-    while angle < -np.pi:
-        angle = angle + 2. * np.pi
-
-    return angle
-
 class Map:
     def __init__(self, w = 200, h = 200):
         self.w = w # width
