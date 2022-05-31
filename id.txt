@@ -1,0 +1,34 @@
+Ahmed Nasser Ahmed
+  Section: 1
+  BN: 8
+  Contributions:
+    - Integrate scan matching and research other methods
+    - Attempt to implement motion model of a car using different models (bicycle, newton, etc..)
+    - General research of different methods
+
+Ahmed Hisham Eid
+  Section: 1
+  BN: 9
+  Contributions:
+    - Occupancy grid mapping and log odds
+    - Extending 2d mapping into 3d
+    - Publish map using PointCloud2
+    - General research of different methods
+
+Abdelrahman Ahmed Mohamed Farid
+  Section: 1
+  BN: 33
+  Contributions:
+    - tf2 Transformation
+    - Attempt to implement hand-made vectorized transformation using matrices
+    - General research of different methods
+
+Youssef Walid Hassan
+  Section: 2
+  BN: 34
+  Contributions:
+    - Occupancy grid mapping and log odds
+    - Extending 2d mapping into 3d
+    - Integrate Bresselham and scikit ray casting
+    - Gazebo and Rviz setups
+    - General research of different methods

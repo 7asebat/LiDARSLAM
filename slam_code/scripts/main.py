@@ -102,14 +102,17 @@ def cast_ray_and_update_map(current_robot_pose, transformed_lidar_p, method='nai
         # hit, but need to subtract the added value above
         map.map[cc[-1], rr[-1], 0] -= map.l_free - map.prior
         map.map[cc[-1], rr[-1], 0] += map.l_occ - map.prior
-        return
     else:
         matched_points = get_points_between(np.array(current_robot_pose).astype(int), np.array(transformed_lidar_p).astype(int), method)
         map.map[matched_points[:, 1], matched_points[:, 0], matched_points[:, 2]] += map.l_free - map.prior
 
         map.map[matched_points[-1, 1], matched_points[-1, 0], matched_points[-1, 2]] -= map.l_free - map.prior
         map.map[matched_points[-1, 1], matched_points[-1, 0], matched_points[-1, 2]] += map.l_occ - map.prior
-        return
+
+
+    # constraint ranges ranges
+    map.map[map.map > 100] = 100
+    map.map[map.map < 0] = 0
 
 def transformed_lidar_reading_callback(data):
     global map
@@ -141,9 +144,7 @@ def transformed_lidar_reading_callback(data):
 
         cast_ray_and_update_map(current_robot_pose, transformed_lidar_p, 'bresenham')
         
-        # constraint ranges ranges
-        map.map[map.map > 100] = 100
-        map.map[map.map < 0] = 0
+
 
 prev_time = time() # in sec
 initial_pose = { 'x': 0, 'y': 0, 'theta': 0}
