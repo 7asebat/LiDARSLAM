@@ -57,16 +57,11 @@ def enumerate_3(M):
 def normalize_and_publish_map():
     grid_map_p = log_to_prob(map.map)
 
-    points = []
-
-    for i in range(grid_map_p.shape[0]):
-        for j in range(grid_map_p.shape[1]):
-            for k in range(grid_map_p.shape[2]):
-                if(grid_map_p[i, j, k] < 0.7):
-                    continue
-
-                q = translate_points_from_center([i, j, k])
-                points.append([q[1], q[0], q[2]])
+    points = enumerate_3(grid_map_p)
+    points = np.delete(points, np.where(points[:, 3] < 0.7), axis=0)
+    points = points[:, :3]
+    points += [-map.h / 2 + 1, -map.w / 2, 0]
+    points = points.tolist()
 
     fields = [PointField('x',    0,  PointField.FLOAT32, 1),
               PointField('y',    4,  PointField.FLOAT32, 1),
@@ -125,7 +120,7 @@ def transformed_lidar_reading_callback(data):
     current_robot_pose = translate_points_to_center(current_robot_pose)
 
     for lidar_p in data:
-        if not (lidar_p[2] > 1.0 and lidar_p[2] < 8.0):
+        if not (lidar_p[2] > 0.3):
             continue
         transformed_lidar_p = lidar_p
         transformed_lidar_p = translate_points_to_center([transformed_lidar_p[0], transformed_lidar_p[1], transformed_lidar_p[2]])
@@ -134,8 +129,15 @@ def transformed_lidar_reading_callback(data):
         if transformed_lidar_p[0] < 0 \
             or transformed_lidar_p[0] > map.w \
             or transformed_lidar_p[1] < 0 \
-            or transformed_lidar_p[1] > map.h:
+            or transformed_lidar_p[1] > map.h \
+            or transformed_lidar_p[2] < 0 \
+            or transformed_lidar_p[2] > map.e:
                 continue
+        
+        # filter out car particles
+        if transformed_lidar_p[0] - current_robot_pose[0] < 4.0 \
+            and np.abs(transformed_lidar_p[1] - current_robot_pose[1]) < 1.0:
+            continue
 
         cast_ray_and_update_map(current_robot_pose, transformed_lidar_p, 'bresenham')
         
