@@ -24,9 +24,9 @@ class Map:
         p_prior = 0.5 # prior probability of occupancy in the sensor model
         self.l_occ = prob_to_log(p_occ) # log odds of occupancy in the sensor model
         self.l_free = prob_to_log(p_free) # log odds of free in the sensor model
-        self.l_prioir = prob_to_log(p_prior) # log odds of prior occupancy in the sensor model
+        self.prior = prob_to_log(p_prior) # log odds of prior occupancy in the sensor model
 
-        self.map =  np.ones((w, h)) * self.l_prioir
+        self.map =  np.ones((w, h)) * self.prior
 
 class Particle:
     def __init__(self, pose):
@@ -92,31 +92,35 @@ def prob_to_log(p):
 def lidar_reading_callback(data):
     global map
 
-    data_gen = pc2.read_points(data, skip_nans=True, field_names=("x", "y", "z"))
-    lidar_gen = np.array(list(data_gen))
+    data = pc2.read_points(data, skip_nans=True, field_names=("x", "y", "z"))
+    data = np.array(list(data))
 
-    robot_pose = [particle.pose['x'], particle.pose['y']]
-    robot_pose = translate_points_to_center(robot_pose)
+    current_robot_pose = [particle.pose['x'], particle.pose['y']]
+    current_robot_pose = translate_points_to_center(current_robot_pose)
 
-    for p in lidar_gen:
-        if not (p[2] > 1.0 and p[2] < 2.0):
+    for lidar_p in data:
+        if not (lidar_p[2] > 1.0 and lidar_p[2] < 2.0):
             continue
-        q = p
-        q = transform_point_to_basis([q[0], q[1], q[2]])
-        q = translate_points_to_center([q[0], q[1]])
+        transformed_lidar_p = lidar_p
+        transformed_lidar_p = transform_point_to_basis([transformed_lidar_p[0], transformed_lidar_p[1], transformed_lidar_p[2]])
+        transformed_lidar_p = translate_points_to_center([transformed_lidar_p[0], transformed_lidar_p[1]])
         
-        if q[0] < 0 or q[0] > map.w or q[1] < 0 or q[1] > map.h:
-            continue
+        # check bounds
+        if transformed_lidar_p[0] < 0 \
+            or transformed_lidar_p[0] > map.w \
+            or transformed_lidar_p[1] < 0 \
+            or transformed_lidar_p[1] > map.h:
+                continue
 
         # cast ray from robot to lidar point
-        rr, cc = line(int(robot_pose[0]), int(robot_pose[1]), int(q[0]), int(q[1]))
+        rr, cc = line(int(current_robot_pose[0]), int(current_robot_pose[1]), int(transformed_lidar_p[0]), int(transformed_lidar_p[1]))
 
         # miss
-        map.map[cc, rr] += map.l_free - map.l_prioir
+        map.map[cc, rr] += map.l_free - map.prior
 
         # hit, but need to subtract the added value above
-        map.map[cc[-1], rr[-1]] -= map.l_free - map.l_prioir
-        map.map[cc[-1], rr[-1]] += map.l_occ - map.l_prioir
+        map.map[cc[-1], rr[-1]] -= map.l_free - map.prior
+        map.map[cc[-1], rr[-1]] += map.l_occ - map.prior
 
         # constraint ranges ranges
         map.map[map.map > 100] = 100
@@ -124,7 +128,7 @@ def lidar_reading_callback(data):
 
 prev_time = time() # in sec
 initial_pose = { 'x': 0, 'y': 0, 'theta': 0}
-particle = Particle (initial_pose)
+particle = Particle(initial_pose)
 
 map = Map()
 world_base_footprint_tf_buffer = None
