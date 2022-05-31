@@ -150,10 +150,6 @@ initial_pose = { 'x': 0, 'y': 0, 'theta': 0}
 particle = Particle(initial_pose)
 
 map = Map(125, 125, 10)
-world_base_footprint_tf_buffer = None
-world_base_footprint_tf_listener = None
-world_base_footprint_tf_transform = None
-
 if __name__ == '__main__':
     try:
         # Initialize SLAM code
