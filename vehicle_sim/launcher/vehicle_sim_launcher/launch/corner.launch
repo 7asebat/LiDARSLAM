@@ -5,6 +5,7 @@
     <node pkg="nodelet" type="nodelet" name="pointcloud_transformer" args="load transform_pointcloud/transformPointcloud test_nodelet" output="screen">
         <param name="to_frame" value="world"/>
         <remap from="~input_pcl2" to="/cloud"/>
+        <remap from="~output_pcl2" to="/transformed_cloud" />
     </node>
 
 
