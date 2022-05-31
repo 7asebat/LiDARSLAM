@@ -13,13 +13,9 @@ from geometry_msgs.msg  import PointStamped, PoseStamped, Pose2D
 from nav_msgs.msg import OccupancyGrid
 from skimage.draw import line
 
-from tf2_sensor_msgs.tf2_sensor_msgs import do_transform_cloud
-
 import tf2_ros
 import tf2_geometry_msgs
-import sensor_msgs
 import std_msgs
-import ros_numpy
 
 def normalize_angle(angle):
     while angle > np.pi:
@@ -35,8 +31,15 @@ class Map:
         self.w = w # width
         self.h = h # height
 
-        # self.map = np.ones(w, h) * 0.5
-        self.map = np.zeros((w, h))
+        sensor_model_p_occ = 0.75 # probability of occupancy in the sensor model
+        sensor_model_p_free = 0.45 # probability of free in the sensor model
+        sensor_model_p_prior = 0.5 # prior probability of occupancy in the sensor model
+        self.sensor_model_l_occ = p2l(sensor_model_p_occ) # log odds of occupancy in the sensor model
+        self.sensor_model_l_free = p2l(sensor_model_p_free) # log odds of free in the sensor model
+        self.sensor_model_l_prior = p2l(sensor_model_p_prior) # log odds of prior occupancy in the sensor model
+
+        self.map =  np.ones((w, h)) * self.sensor_model_l_prior
+
 class Particle:
     def __init__(self, motion_noise, pose):
         self.motion_noise = motion_noise
@@ -62,7 +65,7 @@ def transform_point_to_basis(p):
     pt.point.z = p[2]
 
     try:
-        pt = world_base_footprint_tf_buffer.transform(pt, "world")
+        pt = world_base_footprint_tf_buffer.transform(pt, "world", rospy.Duration(1))
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as err:
         print(err)
 
@@ -73,13 +76,13 @@ def get_points_between(p1, p2):
     num_points = np.linalg.norm(diff)
     unit_diff = diff / num_points
     points = np.array([p1 + i * unit_diff for i in range(int(num_points + 1))]).astype(int)
-    # unique_points = np.unique(points, axis=0)
-    return points
+    unique_points = np.unique(points, axis=0)
+    return unique_points
 
 
 def normalize_and_publish_map():
-    grid_map = map.map
-    grid_map_occupied = (grid_map > 3).astype(int) * 127
+    grid_map_p = l2p(map.map)
+    grid_map_occupied = (grid_map_p * 127).astype(np.uint8)
 
     occup_grid = OccupancyGrid()
     occup_grid.info.width = map.w
@@ -100,10 +103,10 @@ def normalize_and_publish_map():
     
     points = []
 
-    for i in range(grid_map.shape[0]):
-        for j in range(grid_map.shape[1]):
-            a = (grid_map[i, j] > 3) * 255
-            rgb = struct.unpack('I', struct.pack('BBBB', 255, 255, 0, a))[0]
+    for i in range(grid_map_p.shape[0]):
+        for j in range(grid_map_p.shape[1]):
+            a = int(grid_map_p[i, j] * 255)
+            rgb = struct.unpack('I', struct.pack('BBBB', a, a, a, a))[0]
             q = translate_points_from_center([i, j])
             points.append([q[1], q[0], 1, rgb])
         
@@ -119,6 +122,13 @@ def normalize_and_publish_map():
     generated_pc2 = pc2.create_cloud(header, fields, points)
     map_pc2_pub.publish(generated_pc2)
 
+# p(x) = 1 - \frac{1}{1 + e^l(x)}
+def l2p(l):
+    return 1 - (1/(1+np.exp(l)))
+
+# l(x) = log(\frac{p(x)}{1 - p(x)})
+def p2l(p):
+    return np.log(p/(1-p))
 
 
 def lidar_callback(data):
@@ -131,7 +141,7 @@ def lidar_callback(data):
     robot_pose = translate_points_to_center(robot_pose)
 
     for p in lidar_gen:
-        if not (p[2] > 0.5 and p[2] < 1.5):
+        if not (p[2] > 1.0 and p[2] < 2.0):
             continue
         q = p
         q = transform_point_to_basis([q[0], q[1], q[2]])
@@ -140,9 +150,26 @@ def lidar_callback(data):
         if q[0] < 0 or q[0] > map.w or q[1] < 0 or q[1] > map.h:
             continue
 
-        matched_points = get_points_between(np.array([robot_pose[0], robot_pose[1]]).astype(int), np.array([q[0], q[1]]).astype(int))
-        map.map[matched_points[:, 1], matched_points[:, 0]] -= 1
-        map.map[matched_points[-1, 1], matched_points[-1, 0]] += 2
+        rr, cc = line(int(robot_pose[0]), int(robot_pose[1]), int(q[0]), int(q[1]))
+
+        # miss
+        map.map[cc, rr] += map.sensor_model_l_free - map.sensor_model_l_prior
+
+        # hit, but need to subtract the added value above
+        map.map[cc[-1], rr[-1]] -= map.sensor_model_l_free - map.sensor_model_l_prior
+        map.map[cc[-1], rr[-1]] += map.sensor_model_l_occ - map.sensor_model_l_prior
+
+        # constraint ranges ranges
+        map.map[map.map > 100] = 100
+        map.map[map.map < 0] = 0
+
+        # map.map[cc, rr] -= 1
+        # map.map[cc[-1], rr[-1]] += 2
+
+
+        # matched_points = get_points_between(np.array([robot_pose[0], robot_pose[1]]).astype(int), np.array([q[0], q[1]]).astype(int))
+        # map.map[matched_points[:, 1], matched_points[:, 0]] -= 1
+        # map.map[matched_points[-1, 1], matched_points[-1, 0]] += 2
         
 
 
@@ -171,12 +198,12 @@ if __name__ == '__main__':
         map_pc2_pub = rospy.Publisher("/map_pc2", PointCloud2, queue_size=10)
 
         world_base_footprint_tf_buffer = tf2_ros.Buffer()
-        world_base_footprint_tf_listener = tf2_ros.TransformListener(world_base_footprint_tf_buffer)
+        world_base_footprint_tf_listener = tf2_ros.TransformListener(world_base_footprint_tf_buffer, queue_size=30)
 
         # Execute SLAM code
-        rate = rospy.Rate(1)  # 10hz
+        rate = rospy.Rate(1)  # 1hz
         while not rospy.is_shutdown():
-            world_base_footprint_tf_transform = world_base_footprint_tf_buffer.lookup_transform('world', 'base_footprint', rospy.Time(0), rospy.Duration(3))
+            world_base_footprint_tf_transform = world_base_footprint_tf_buffer.lookup_transform('world', 'base_footprint', rospy.Time(0), rospy.Duration(1))
             normalize_and_publish_map()
             rate.sleep()
 
