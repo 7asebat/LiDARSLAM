@@ -12,6 +12,7 @@ from sensor_msgs.msg    import PointCloud2, PointField
 from geometry_msgs.msg  import PointStamped, PoseStamped, Pose2D
 from nav_msgs.msg import OccupancyGrid
 from skimage.draw import line
+from bresenham3d import Bresenham3D
 
 import tf2_ros
 import tf2_geometry_msgs
@@ -72,12 +73,13 @@ def transform_point_to_basis(p):
     return np.array([pt.point.x, pt.point.y, pt.point.z])
 
 def get_points_between(p1, p2):
-    diff = p2 - p1
-    num_points = np.linalg.norm(diff)
-    unit_diff = diff / num_points
-    points = np.array([p1 + i * unit_diff for i in range(int(num_points + 1))]).astype(int)
-    unique_points = np.unique(points, axis=0)
-    return unique_points
+    return Bresenham3D(p1, p2)
+    # diff = p2 - p1
+    # num_points = np.linalg.norm(diff)
+    # unit_diff = diff / num_points
+    # points = np.array([p1 + i * unit_diff for i in range(int(num_points + 1))]).astype(int)
+    # unique_points = np.unique(points, axis=0)
+    # return unique_points
 
 
 def normalize_and_publish_map():
