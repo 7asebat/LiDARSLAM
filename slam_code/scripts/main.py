@@ -31,12 +31,13 @@ def normalize_angle(angle):
     return angle
 
 class Map:
-    def __init__(self, w = 200, h = 200):
+    def __init__(self, w = 200, h = 200, e = 10):
         self.w = w # width
         self.h = h # height
+        self.e = e # elevation
 
         # self.map = np.ones(w, h) * 0.5
-        self.map = np.zeros((w, h))
+        self.map = np.zeros((w, h, e))
 class Particle:
     def __init__(self, motion_noise, pose):
         self.motion_noise = motion_noise
@@ -49,10 +50,10 @@ def pose_2d_callback(data):
     particle.pose['theta'] = data.theta
 
 def translate_points_to_center(p):
-    return p[0] + map.h/2, p[1] + map.w/2
+    return p[0] + map.h/2, p[1] + map.w/2, p[2]
 
 def translate_points_from_center(p):
-    return p[0] - map.h/2 + 1, p[1] - map.w/2 + 1
+    return p[0] - map.h/2 + 1, p[1] - map.w/2 + 1, p[2]
 
 def transform_point_to_basis(p):
     pt = tf2_geometry_msgs.PointStamped()
@@ -79,12 +80,14 @@ def get_points_between(p1, p2):
 
 def normalize_and_publish_map():
     grid_map = map.map
+
     grid_map_occupied = (grid_map > 3).astype(int) * 127
+    grid_map_occupied_2d = grid_map_occupied[:, :, 2]
 
     occup_grid = OccupancyGrid()
     occup_grid.info.width = map.w
     occup_grid.info.height = map.h
-    occup_grid.data = grid_map_occupied.ravel()
+    occup_grid.data = grid_map_occupied_2d.ravel()
     occup_grid.header.stamp = rospy.Time.now()
     occup_grid.header.frame_id = "world"
     occup_grid.info.resolution = 1.0
@@ -98,26 +101,27 @@ def normalize_and_publish_map():
 
     map_pub.publish(occup_grid)
     
-    points = []
+    # points = []
 
-    for i in range(grid_map.shape[0]):
-        for j in range(grid_map.shape[1]):
-            a = (grid_map[i, j] > 3) * 255
-            rgb = struct.unpack('I', struct.pack('BBBB', 255, 255, 0, a))[0]
-            q = translate_points_from_center([i, j])
-            points.append([q[1], q[0], 1, rgb])
+    # for i in range(grid_map.shape[0]):
+    #     for j in range(grid_map.shape[1]):
+    #         for k in range(grid_map.shape[2]):
+    #             a = (grid_map[i, j, k] > 3) * 255
+    #             rgb = struct.unpack('I', struct.pack('BBBB', 255, 255, 0, a))[0]
+    #             q = [i, j, k]
+    #             points.append([q[1], q[0], q[2], rgb])
         
   
-    fields = [PointField('x',    0,  PointField.FLOAT32, 1),
-              PointField('y',    4,  PointField.FLOAT32, 1),
-              PointField('z',    8,  PointField.FLOAT32, 1),
-              PointField('rgba', 12, PointField.UINT32,  1)]   
+    # fields = [PointField('x',    0,  PointField.FLOAT32, 1),
+    #           PointField('y',    4,  PointField.FLOAT32, 1),
+    #           PointField('z',    8,  PointField.FLOAT32, 1),
+    #           PointField('rgba', 12, PointField.UINT32,  1)]   
 
-    header = std_msgs.msg.Header()
-    header.frame_id = "world"
-    header.stamp = rospy.Time.now()
-    generated_pc2 = pc2.create_cloud(header, fields, points)
-    map_pc2_pub.publish(generated_pc2)
+    # header = std_msgs.msg.Header()
+    # header.frame_id = "world"
+    # header.stamp = rospy.Time.now()
+    # generated_pc2 = pc2.create_cloud(header, fields, points)
+    # map_pc2_pub.publish(generated_pc2)
 
 
 
@@ -127,22 +131,28 @@ def lidar_callback(data):
     data_gen = pc2.read_points(data, skip_nans=True, field_names=("x", "y", "z"))
     lidar_gen = np.array(list(data_gen))
 
-    robot_pose = [particle.pose['x'], particle.pose['y']]
+    robot_pose = [particle.pose['x'], particle.pose['y'], 1]
     robot_pose = translate_points_to_center(robot_pose)
 
     for p in lidar_gen:
-        if not (p[2] > 0.5 and p[2] < 1.5):
-            continue
-        q = p
-        q = transform_point_to_basis([q[0], q[1], q[2]])
-        q = translate_points_to_center([q[0], q[1]])
-        
-        if q[0] < 0 or q[0] > map.w or q[1] < 0 or q[1] > map.h:
+        # filter ground
+        if not (p[2] > 0.5 and p[2] < 10):
             continue
 
-        matched_points = get_points_between(np.array([robot_pose[0], robot_pose[1]]).astype(int), np.array([q[0], q[1]]).astype(int))
-        map.map[matched_points[:, 1], matched_points[:, 0]] -= 1
-        map.map[matched_points[-1, 1], matched_points[-1, 0]] += 2
+        q = p
+        q = transform_point_to_basis([q[0], q[1], q[2]])
+        q = translate_points_to_center([q[0], q[1], q[2]])
+        
+        # filter out of bound
+        if q[0] < 0 or q[0] > map.w or q[1] < 0 or q[1] > map.h or q[2] < 0 or q[2] > map.e:
+            continue
+
+        matched_points = get_points_between(
+            np.array([robot_pose[0], robot_pose[1], robot_pose[2]]).astype(int), 
+            np.array([q[0], q[1], q[2]]).astype(int))
+
+        # map.map[matched_points[:, 1], matched_points[:, 0], matched_points[:, 2]] -= 1
+        map.map[matched_points[-1, 1], matched_points[-1, 0], matched_points[-1, 2]] += 50
         
 
 
